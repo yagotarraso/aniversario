@@ -6,8 +6,8 @@ import { createParis } from './paris.js';
 
 // Fotos del corazón (cuadradas): se ven a través de los pétalos y van pasando en este orden
 const PHOTOS = ['fotos/1.webp', 'fotos/2.webp', 'fotos/3.webp', 'fotos/4.webp', 'fotos/5.webp', 'fotos/6.webp'];
-const PHOTO_HOLD = 2.5;        // segundos que se ve cada foto
-const PHOTO_FADE = 0.7;        // fundido de una a la siguiente
+const PHOTO_HOLD = 2.0;        // segundos que se ve cada foto
+const PHOTO_FADE = 0.6;        // fundido de una a la siguiente
 const PHOTO_ZOOM = 1.0;        // >1 amplía las fotos dentro del corazón
 const PHOTO_OFFSET = [0, 0];   // mueve las fotos dentro del corazón: [x, y] entre -0.5 y 0.5
 
@@ -1283,12 +1283,12 @@ function pushRose(hitPoint) {
   const dx = clamp(pushSide * Math.cos(a) - clamp(r.x, -1.5, 1.5) * 0.3, -1.3, 1.3) * room;
   const dy = Math.sin(a) * 0.7;
   const force = rr(0.85, 1.15);
-  rose.tiltVel.y -= dx * 4.5 * force;           // se inclina hacia donde va
-  rose.tiltVel.x -= (1.4 + dy * 2.2) * force;    // y hacia atrás
-  rose.yawVel += rr(-1, 1) * 3 + dx * 2;
-  rose.offVel.x += dx * 4.5 * force;
-  rose.offVel.y += dy * 2.5 * force;
-  rose.offVel.z -= 3 * force;
+  rose.tiltVel.y -= dx * 3.8 * force;           // se inclina hacia donde va
+  rose.tiltVel.x -= (1.2 + dy * 1.9) * force;    // y hacia atrás
+  rose.yawVel += rr(-1, 1) * 2.6 + dx * 1.7;
+  rose.offVel.x += dx * 3.8 * force;
+  rose.offVel.y += dy * 2.1 * force;
+  rose.offVel.z -= 2.6 * force;
   // si se toca muy seguido, que no se dispare
   rose.tiltVel.clampLength(0, 6.5);
   rose.offVel.clampLength(0, 6);
