@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createParis } from './paris.js';
 
 /* ================= Ajustes ================= */
@@ -504,7 +505,7 @@ function petalGeometry({ L, W, T, phi0, phi1, wrap, curl, seed }) {
 }
 
 // Gema alargada (hojas, sépalos): sección en rombo a lo largo de +X, cara plana mirando a +Z
-function gemGeometry({ length, width, height, below = 0.5, segs = 5, widest = 0.45, bend = 0, seed }) {
+function gemGeometry({ length, width, height, below = 0.5, segs = 5, widest = 0.45, bend = 0, seed, palette = GREEN_FACETS }) {
   const rnd = mulberry32(seed);
   const S = [];
   for (let k = 0; k <= segs; k++) {
@@ -530,7 +531,7 @@ function gemGeometry({ length, width, height, below = 0.5, segs = 5, widest = 0.
       tri(a, c, b); tri(a, d, c);
     }
   }
-  return facetColors(buildGeometry(pos), GREEN_FACETS, seed);
+  return facetColors(buildGeometry(pos), palette, seed);
 }
 
 /* ================= La rosa ================= */
@@ -543,7 +544,8 @@ const rose = {
   tiltAng: new V2(), tiltVel: new V2(),
   yawAng: 0, yawVel: 0,
   off: new V3(), offVel: new V3(),
-  scale: 0, drop: 0,
+  scale: 1, drop: 0,
+  stem: new THREE.Group(), // tallo, hojas y espinas: dentro del tarro van recogidos y crecen al salir
   petals: [],
   pickables: [],
 };
@@ -594,6 +596,12 @@ LAYERS.forEach((Ld, li) => {
 
 // Cáliz, sépalos, tallo, hojas y espinas
 {
+  rose.stem.position.y = 0.85; // crece desde lo alto del tallo, bajo la flor
+  const stemParts = new THREE.Group();
+  stemParts.position.y = -0.85;
+  rose.stem.add(stemParts);
+  rose.yaw.add(rose.stem);
+
   const receptacle = new THREE.Mesh(facetColors(new THREE.IcosahedronGeometry(0.2, 0), GREEN_FACETS, 401), greenGlass);
   receptacle.scale.set(1, 0.75, 1);
   receptacle.position.y = -0.22;
@@ -623,13 +631,13 @@ LAYERS.forEach((Ld, li) => {
   for (let i = 0; i < sp.count; i++) sp.setX(i, sp.getX(i) + Math.sin(sp.getY(i) * 0.9) * 0.05);
   stemGeo.computeVertexNormals();
   const stem = new THREE.Mesh(facetColors(stemGeo, GREEN_FACETS, 402), greenGlass);
-  rose.yaw.add(stem);
+  stemParts.add(stem);
   rose.pickables.push(stem);
 
   const tip = new THREE.Mesh(facetColors(new THREE.ConeGeometry(0.085, 0.3, 6), GREEN_FACETS, 403), greenGlass);
   tip.rotation.x = Math.PI;
   tip.position.set(Math.sin(stemBottom * 0.9) * 0.05, stemBottom - 0.15, 0);
-  rose.yaw.add(tip);
+  stemParts.add(tip);
 
   const leafDefs = [
     { y: -0.55, side: -1, len: 1.4, w: 0.36, up: 0.62, seed: 601 },
@@ -642,7 +650,7 @@ LAYERS.forEach((Ld, li) => {
     );
     leaf.position.set(Math.sin(d.y * 0.9) * 0.05, d.y, 0.02);
     leaf.rotation.set(0, d.side < 0 ? Math.PI : 0, d.up);
-    rose.yaw.add(leaf);
+    stemParts.add(leaf);
     rose.pickables.push(leaf);
   }
 
@@ -651,8 +659,296 @@ LAYERS.forEach((Ld, li) => {
     const dir = new V3(Math.sin(a), 0.6, Math.cos(a)).normalize();
     thorn.quaternion.setFromUnitVectors(new V3(0, 1, 0), dir);
     thorn.position.set(Math.sin(y * 0.9) * 0.05 + Math.sin(a) * 0.1, y, Math.cos(a) * 0.1);
-    rose.yaw.add(thorn);
+    stemParts.add(thorn);
   }
+}
+
+/* ================= El tarro (aparece primero; al tocarlo sale la rosa) ================= */
+
+// Medidas del tarro en sus propias unidades (alto 3); luego se escala para que quepa en pantalla
+const JAR = { H: 3, R: 0.77, neck: 0.56, lip: 0.65, wall: 0.035, base: 0.13, shoulder: 2.0 };
+const ROSE_IN_JAR = { pos: new V3(0, 1.42 - 1.05 * 0.45, 0.12), scale: 0.45 };
+const JAR_SPIN = 0.25; // giro solo, en rad/s, cuando no se toca
+const hint = document.getElementById('hint');
+
+const jar = {
+  root: new THREE.Group(),
+  spin: new THREE.Group(),
+  content: new THREE.Group(),
+  S: 1, baseY: 0, scale: 0, drop: 0,
+  yaw: -0.5, yawVel: JAR_SPIN, tilt: 0, dragging: false,
+  shake: 0,
+};
+scene.add(jar.root);
+jar.root.add(jar.spin);
+jar.spin.position.y = JAR.H / 2; // gira sobre su centro
+jar.spin.add(jar.content);
+jar.content.position.y = -JAR.H / 2;
+jar.root.scale.setScalar(1e-4);
+
+// Vidrio fino: casi transparente en el centro y más visible en los bordes, con reflejos
+const jarFade = { value: 1 };
+const jarGlass = new THREE.MeshPhysicalMaterial({
+  color: '#f2faf7',
+  roughness: 0.03,
+  metalness: 0,
+  transparent: true,
+  opacity: 0.08,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+  clearcoat: 1,
+  clearcoatRoughness: 0.02,
+  envMapIntensity: 1.6,
+  iridescence: 0.08,
+  iridescenceIOR: 1.3,
+  fog: false,
+});
+jarGlass.onBeforeCompile = (shader) => {
+  shader.uniforms.uFade = jarFade;
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform float uFade;')
+    .replace('#include <opaque_fragment>', /* glsl */ `#include <opaque_fragment>
+      float fr = pow(1.0 - saturate(abs(dot(normal, normalize(vViewPosition)))), 2.2);
+      float hi = smoothstep(0.75, 1.6, max(max(outgoingLight.r, outgoingLight.g), outgoingLight.b));
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.36, 0.5, 0.48), fr * 0.55 * (1.0 - hi));
+      gl_FragColor.a = saturate(gl_FragColor.a + fr * 0.5 + hi * 0.5) * uFade;`);
+};
+
+// Cristal de las flores, con la misma estética que la rosa
+const WHITE_FACETS = ['#ffffff', '#c4c7d6'];
+const FUCHSIA_FACETS = ['#ffc4e7', '#e0158f'];
+const SAGE_FACETS = ['#eef6f1', '#5f8a78'];
+const DAISY_FACETS = ['#f3ffd9', '#5fc436'];
+const whiteGlass = pinkGlass.clone();
+Object.assign(whiteGlass, { transmission: 0.72, roughness: 0.08, iridescence: 0.08, thickness: 0.2, attenuationDistance: 3 });
+whiteGlass.emissive.set('#fff4fa');
+whiteGlass.attenuationColor.set('#ffffff');
+const fuchsiaGlass = pinkGlass.clone();
+Object.assign(fuchsiaGlass, { iridescence: 0.1, emissiveIntensity: 0.25, attenuationDistance: 0.6 });
+fuchsiaGlass.emissive.set('#ff1f93');
+fuchsiaGlass.attenuationColor.set('#ff3fa8');
+const sageGlass = greenGlass.clone();
+sageGlass.emissive.set('#4f8a74');
+sageGlass.attenuationColor.set('#a6cdb9');
+
+function jarGeometry() {
+  const { H, R, neck, lip, wall, base, shoulder } = JAR;
+  const P = (x, y) => new V2(x, y);
+  const pts = [P(0, 0)];
+  for (let i = 0; i <= 4; i++) { // canto redondeado de la base
+    const a = -Math.PI / 2 + (i / 4) * (Math.PI / 2);
+    pts.push(P(R - 0.1 + 0.1 * Math.cos(a), 0.1 + 0.1 * Math.sin(a)));
+  }
+  const sh = (r0, r1, h, k) => P(r1 + (r0 - r1) * Math.cos((k * Math.PI) / 2), shoulder + h * Math.sin((k * Math.PI) / 2));
+  for (let i = 0; i <= 8; i++) pts.push(sh(R, neck, 0.32, i / 8)); // hombro
+  pts.push(P(neck, 2.82), P(neck + 0.03, 2.85), P(lip, 2.88), P(lip + 0.01, 2.94), P(lip - 0.02, 2.99), P(lip - 0.07, H));
+  pts.push(P(neck - wall + 0.01, H), P(neck - wall, 2.96));
+  for (let i = 8; i >= 0; i--) pts.push(sh(R - wall, neck - wall, 0.32 - wall, i / 8));
+  for (let i = 4; i >= 0; i--) {
+    const a = -Math.PI / 2 + (i / 4) * (Math.PI / 2);
+    pts.push(P(R - wall - 0.08 + 0.08 * Math.cos(a), base + 0.08 + 0.08 * Math.sin(a)));
+  }
+  pts.push(P(0, base));
+  return new THREE.LatheGeometry(pts, 48);
+}
+
+// Ayuda: coloca una geometría (cara hacia +Z) mirando en la dirección dir, con un giro propio
+const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m = new THREE.Matrix4();
+function placed(geo, pos, dir, roll = 0, scale = 1) {
+  _q.setFromUnitVectors(new V3(0, 0, 1), dir.clone().normalize());
+  _q2.setFromAxisAngle(new V3(0, 0, 1), roll);
+  _q.multiply(_q2);
+  return geo.clone().applyMatrix4(_m.compose(pos, _q, new V3(scale, scale, scale)));
+}
+const noUV = (g) => { g.deleteAttribute('uv'); return g; };
+
+// Margarita: dos coronas de pétalos finos alrededor de un botón verde
+function daisy(seed) {
+  const r = mulberry32(seed);
+  const petals = [];
+  for (let row = 0; row < 2; row++) {
+    const n = row ? 12 : 14;
+    for (let i = 0; i < n; i++) {
+      const g = gemGeometry({
+        length: (row ? 0.26 : 0.33) * (0.88 + r() * 0.24), width: 0.095, height: 0.024,
+        widest: 0.62, bend: 0.03, segs: 4, seed: seed * 40 + row * 20 + i, palette: WHITE_FACETS,
+      });
+      g.rotateY(-(row ? 0.55 : 0.22) - r() * 0.15); // las puntas se curvan hacia delante
+      g.translate(0.05, 0, row * 0.015);
+      g.rotateZ(((i + row * 0.5) / n) * Math.PI * 2 + (r() - 0.5) * 0.15);
+      petals.push(g);
+    }
+  }
+  const center = noUV(facetColors(new THREE.IcosahedronGeometry(0.1, 1), DAISY_FACETS, seed + 7));
+  center.scale(1, 1, 0.5).translate(0, 0, 0.03);
+  return { petals: mergeGeometries(petals), center };
+}
+
+// Clavel: una bola de pétalos anchos y rizados
+function carnation(seed) {
+  const r = mulberry32(seed);
+  const parts = [];
+  const d = new V3();
+  for (let i = 0; i < 34; i++) {
+    d.set(r() * 2 - 1, r() * 2 - 1, r() * 2 - 1 + 0.7).normalize();
+    const g = gemGeometry({
+      length: 0.2 + r() * 0.09, width: 0.13 + r() * 0.05, height: 0.02,
+      widest: 0.72, bend: (r() - 0.5) * 0.1, segs: 3, seed: seed * 50 + i, palette: FUCHSIA_FACETS,
+    });
+    g.rotateX(r() * Math.PI * 2);
+    _q.setFromUnitVectors(new V3(1, 0, 0), d);
+    g.applyQuaternion(_q).translate(d.x * 0.05, d.y * 0.05, d.z * 0.05);
+    parts.push(g);
+  }
+  return mergeGeometries(parts);
+}
+
+// Rama de eucalipto: tallo fino con hojas redondas por parejas; la punta sale desnuda por la boca
+function sprig(path, seed) {
+  const r = mulberry32(seed);
+  const curve = new THREE.CatmullRomCurve3(path);
+  const parts = [noUV(facetColors(new THREE.TubeGeometry(curve, 24, 0.013, 5), SAGE_FACETS, seed))];
+  const leaf = noUV(facetColors(new THREE.IcosahedronGeometry(1, 1), SAGE_FACETS, seed + 1));
+  const T = new V3(), S = new V3(), N = new V3(), arb = new V3(0.3, 0.1, 1).normalize();
+  let k = 0;
+  for (let t = 0.04; t < 0.6; t += 0.11, k++) {
+    const p = curve.getPointAt(t);
+    curve.getTangentAt(t, T);
+    S.crossVectors(T, arb).normalize().applyAxisAngle(T, (k % 2) * (Math.PI / 2) + (r() - 0.5) * 0.4);
+    N.crossVectors(S, T).normalize();
+    const size = (0.17 - t * 0.09) * (0.85 + r() * 0.3);
+    for (const side of [1, -1]) {
+      const sx = S.clone().multiplyScalar(side);
+      const basis = new THREE.Matrix4().makeBasis(sx, T, N.clone().multiplyScalar(side));
+      const m = new THREE.Matrix4().compose(
+        p.clone().addScaledVector(sx, size * 0.95),
+        new THREE.Quaternion().setFromRotationMatrix(basis),
+        new V3(size, size, size * 0.14),
+      );
+      parts.push(leaf.clone().applyMatrix4(m));
+    }
+  }
+  return mergeGeometries(parts);
+}
+
+{
+  const glass = new THREE.Mesh(jarGeometry(), jarGlass);
+  glass.renderOrder = 5;
+  jar.content.add(glass);
+
+  const white = [], centers = [], pink = [], sage = [];
+  const ring = (a, y, rad, up) => ({
+    pos: new V3(Math.sin(a) * rad, y, Math.cos(a) * rad),
+    dir: new V3(Math.sin(a), up, Math.cos(a)),
+  });
+  const addDaisy = ({ pos, dir }, seed, scale = 1) => {
+    const g = daisy(seed), roll = mulberry32(seed)() * 6.28;
+    white.push(placed(g.petals, pos, dir, roll, scale));
+    centers.push(placed(g.center, pos, dir, roll, scale));
+  };
+  const deg = Math.PI / 180;
+  // abajo, margaritas mirando al cristal
+  [20, 110, 200, 290].forEach((a, i) => addDaisy(ring(a * deg, 0.5, 0.38, 0.25), 900 + i));
+  // en medio, detrás de la rosa
+  addDaisy(ring(140 * deg, 1.08, 0.38, 0.1), 910, 0.95);
+  addDaisy(ring(255 * deg, 1.0, 0.4, 0.15), 911, 0.9);
+  const c1 = carnation(920), c2 = carnation(921);
+  pink.push(placed(c1, ring(215 * deg, 1.6, 0.36, 0.4).pos, ring(215 * deg, 0, 1, 0.6).dir, 0.4, 1.05));
+  pink.push(placed(c2, ring(320 * deg, 1.15, 0.36, 0.2).pos, ring(320 * deg, 0, 1, 0.3).dir, 1.2, 0.95));
+  pink.push(placed(c2, ring(75 * deg, 1.7, 0.34, 0.4).pos, ring(75 * deg, 0, 1, 0.5).dir, 2.2, 0.85));
+  // arriba, margaritas algo inclinadas hacia la boca
+  [60, 180, 300].forEach((a, i) => addDaisy(ring(a * deg, 1.98, 0.4, 0.6), 930 + i, 0.92));
+  addDaisy(ring(-25 * deg, 2.12, 0.34, 0.9), 934, 0.8);
+  // eucalipto, saliendo por la boca
+  sage.push(sprig([new V3(0.12, 1.15, 0.22), new V3(0.02, 2.0, 0.14), new V3(-0.1, 2.75, 0.05), new V3(-0.17, 3.5, 0)], 940));
+  sage.push(sprig([new V3(-0.26, 1.35, -0.12), new V3(0.04, 2.2, -0.06), new V3(0.18, 2.9, 0), new V3(0.27, 3.62, 0.05)], 941));
+
+  for (const [list, mat] of [[white, whiteGlass], [centers, greenGlass], [pink, fuchsiaGlass], [sage, sageGlass]]) {
+    jar.content.add(new THREE.Mesh(mergeGeometries(list), mat));
+  }
+
+  // unos destellos dentro del cristal
+  const jr = mulberry32(950);
+  jar.content.add(new THREE.Points(sparkGeometry(Array.from({ length: 18 }, () => {
+    const a = jr() * Math.PI * 2, rad = 0.2 + jr() * 0.55, y = 0.2 + jr() * 2.7;
+    return { x: Math.sin(a) * Math.min(rad, y > 2.2 ? 0.5 : 0.75), y, z: Math.cos(a) * rad, size: 0.12 + jr() * 0.14, alpha: 0.85 };
+  })), twinkleMat));
+}
+
+// La rosa empieza dentro del tarro, pequeña y con el tallo recogido
+jar.content.add(rose.root);
+rose.stem.scale.set(0.3, 0.02, 0.3);
+
+// Tamaño y posición del tarro para que quepa en pantalla (deja sitio abajo para el texto)
+function fitJar() {
+  const halfH = Math.max(3.5, 3.8 / 2 / camera.aspect);
+  const look = startView().look;
+  jar.S = Math.min((0.56 * 2 * halfH) / JAR.H, (0.7 * 2 * halfH * camera.aspect) / (2 * JAR.R));
+  jar.baseY = look.y + 0.08 * halfH - 1.75 * jar.S;
+}
+
+function updateJar(dt, t) {
+  if (!jar.root.visible) return;
+  if (!jar.dragging) {
+    jar.yawVel += (JAR_SPIN - jar.yawVel) * (1 - Math.exp(-dt * 1.2)); // tras soltarlo frena y vuelve a girar solo
+    jar.yaw += jar.yawVel * dt;
+    jar.tilt *= Math.exp(-dt * 3);
+  }
+  jar.shake *= Math.exp(-dt * 5);
+  const sh = jar.shake * Math.sin(t * 38);
+  jar.spin.rotation.set(jar.tilt + sh * 0.04, jar.yaw, sh * 0.06);
+  jar.root.position.set(0, jar.baseY + Math.sin(t * 0.9) * 0.07 + jar.drop, 0);
+  jar.root.scale.setScalar(Math.max(1e-4, jar.S * jar.scale));
+}
+
+// Al tocar el tarro: la rosa sube por la boca, crece y se queda flotando; el tarro cae y desaparece
+let releaseFx = null;
+function openJar() {
+  if (state !== 'jar') return;
+  state = 'release';
+  document.body.classList.remove('show-hint');
+  if (isTouch) navigator.vibrate?.(18);
+  jar.dragging = false;
+  jar.shake = 1;
+
+  const up = new V3(0, 1, 0).applyQuaternion(jar.spin.getWorldQuaternion(new THREE.Quaternion()));
+  const mouth = jar.content.localToWorld(new V3(0, JAR.H + 0.1, 0));
+  burst.emit(mouth, 30, { speed: 1.4, size: 0.14, life: 1.2, spread: 0.3 });
+  scene.attach(rose.root);
+  const p0 = rose.root.position.clone(), q0 = rose.root.quaternion.clone(), s0 = rose.root.scale.x;
+  const p1 = p0.clone().addScaledVector(up, 1.9 * jar.S); // la flor asoma por encima de la boca
+  const tmp = new V3(), ident = new THREE.Quaternion();
+  let t = 0, popped = false;
+  const D = 2.6;
+
+  releaseFx = (dt) => {
+    t += dt;
+    const k = Math.min(t / D, 1);
+    // updateRose acaba de poner la rosa donde estará al jugar: mezclamos el camino de salida con ese sitio
+    const rise = ease.inOutSine(smooth(0, 0.4, k));
+    const move = ease.inOutCubic(smooth(0.28, 0.95, k));
+    tmp.lerpVectors(p0, p1, rise);
+    rose.root.position.lerpVectors(tmp, rose.root.position, move);
+    rose.root.quaternion.slerpQuaternions(q0, ident, move);
+    rose.root.scale.setScalar(lerp(s0, 1, ease.inOutSine(smooth(0.42, 0.95, k))));
+    const g = smooth(0.42, 0.95, k);
+    rose.stem.scale.set(lerp(0.3, 1, g), Math.max(0.02, ease.outBack(g)), lerp(0.3, 1, g));
+    if (k > 0.4 && !popped) {
+      popped = true;
+      burst.emit(rose.bloom.getWorldPosition(tmp), 40, { speed: 2, size: 0.16, life: 1.4, spread: 0.5 });
+    }
+    // el tarro se va hacia abajo cuando la rosa ya ha salido
+    const fall = smooth(0.38, 0.8, k);
+    jar.drop = -12 * fall * fall;
+    jarFade.value = 1 - smooth(0.6, 0.8, k);
+    if (k >= 0.8) jar.root.visible = false;
+    if (k >= 1) {
+      releaseFx = null;
+      state = 'play';
+      hint.textContent = 'toca la rosa';
+      wait(1.0, () => { if (removed === 0) document.body.classList.add('show-hint'); });
+    }
+  };
 }
 
 /* ================= El corazón del fondo ================= */
@@ -939,12 +1235,41 @@ function onTap(clientX, clientY) {
   if (removed === TOTAL_PETALS) finale();
 }
 
+// Con el tarro: arrastrar lo gira y un toque lo abre. Con la rosa, cada toque cuenta al instante.
+const drag = { id: null, x: 0, y: 0, moved: 0, t: 0 };
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
+  if (state === 'intro' || state === 'jar') {
+    Object.assign(drag, { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t: performance.now() });
+    try { canvas.setPointerCapture(e.pointerId); } catch {} // así el giro sigue aunque el dedo salga del lienzo
+    jar.dragging = true;
+    return;
+  }
   onTap(e.clientX, e.clientY);
 });
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== drag.id) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y, now = performance.now();
+  const k = 6 / Math.min(innerWidth, innerHeight); // radianes por píxel
+  jar.yaw += dx * k;
+  jar.yawVel = clamp(lerp(jar.yawVel, (dx * k) / Math.max((now - drag.t) / 1000, 1 / 60), 0.5), -7, 7);
+  jar.tilt = clamp(jar.tilt + dy * k * 0.5, -0.45, 0.45);
+  drag.moved += Math.hypot(dx, dy);
+  Object.assign(drag, { x: e.clientX, y: e.clientY, t: now });
+});
+const endDrag = (e) => {
+  if (e.pointerId !== drag.id) return;
+  drag.id = null;
+  jar.dragging = false;
+  if (performance.now() - drag.t > 120) jar.yawVel *= 0.3; // si se quedó quieto antes de soltar, sin inercia
+  if (e.type === 'pointerup' && drag.moved < 10) openJar();
+};
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
 addEventListener('keydown', (e) => {
-  if (e.key === ' ' || e.key === 'Enter') onTap(innerWidth / 2, innerHeight * 0.4);
+  if (e.key !== ' ' && e.key !== 'Enter') return;
+  if (state === 'jar') openJar();
+  else onTap(innerWidth / 2, innerHeight * 0.4);
 });
 addEventListener('pointermove', (e) => {
   parallax.set((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1);
@@ -1114,7 +1439,14 @@ function step(dt) {
 
   updateTweens(dt);
   applyAtmosphere(dt);
+  updateJar(dt, time);
   if (rose.root.visible) updateRose(dt, time);
+  if (state === 'intro' || state === 'jar') {
+    // mientras está en el tarro, la rosa se queda en su sitio dentro de él
+    rose.root.position.copy(ROSE_IN_JAR.pos);
+    rose.root.scale.setScalar(ROSE_IN_JAR.scale);
+  }
+  releaseFx?.(dt);
   burst.update(dt);
 
   if (state === 'final') {
@@ -1141,9 +1473,11 @@ if (new URLSearchParams(location.search).has('debug')) {
       renderer.render(scene, camera);
     },
     tap: (x = innerWidth / 2, y = innerHeight * 0.35) => onTap(x, y),
+    open: () => openJar(),
+    spin(rad, tilt = 0) { jar.yaw += rad; jar.tilt = tilt; },
     get state() { return state; },
     pause(on = true) { paused = on; },
-    scene, camera, heart, rose, heartCells,
+    scene, camera, heart, rose, heartCells, jar,
   };
 }
 
@@ -1155,10 +1489,11 @@ function onResize() {
   renderer.setSize(innerWidth, innerHeight, false);
   uniforms.uPR.value = renderer.getPixelRatio();
   uniforms.uScale.value = innerHeight / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  if (state === 'intro' || state === 'play') {
+  if (state === 'intro' || state === 'jar' || state === 'release' || state === 'play') {
     const v = startView();
     camera.position.copy(v.pos);
     camLook.copy(v.look);
+    if (state === 'intro' || state === 'jar') fitJar();
   } else if (finalView) {
     finalView = endView();
     paris.layout(finalView, HEART_WIDTH / 2);
@@ -1169,10 +1504,11 @@ addEventListener('resize', onResize);
 onResize();
 
 requestAnimationFrame(() => document.body.classList.add('ready'));
-tween(1.8, (k) => { rose.scale = Math.max(1e-4, ease.outBack(k)); }, {
+// Primero aparece el tarro
+tween(1.8, (k) => { jar.scale = ease.outBack(k); }, {
   onDone: () => {
-    state = 'play';
-    wait(1.0, () => { if (removed === 0) document.body.classList.add('show-hint'); });
+    state = 'jar';
+    wait(1.2, () => { if (state === 'jar') document.body.classList.add('show-hint'); });
   },
 });
-burst.emit(new V3(0, BLOOM_Y, 0), 50, { speed: 2, size: 0.16, life: 1.6, spread: 0.5 });
+burst.emit(new V3(0, jar.baseY + 1.5 * jar.S, 0), 50, { speed: 2, size: 0.16, life: 1.6, spread: 0.8 });
