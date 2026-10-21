@@ -6,8 +6,8 @@ import { createParis } from './paris.js';
 
 // Fotos del corazón (cuadradas): se ven a través de los pétalos y van pasando en este orden
 const PHOTOS = ['fotos/1.webp', 'fotos/2.webp', 'fotos/3.webp', 'fotos/4.webp', 'fotos/5.webp', 'fotos/6.webp'];
-const PHOTO_HOLD = 4.5;        // segundos que se ve cada foto
-const PHOTO_FADE = 1.4;        // fundido de una a la siguiente
+const PHOTO_HOLD = 2.5;        // segundos que se ve cada foto
+const PHOTO_FADE = 0.7;        // fundido de una a la siguiente
 const PHOTO_ZOOM = 1.0;        // >1 amplía las fotos dentro del corazón
 const PHOTO_OFFSET = [0, 0];   // mueve las fotos dentro del corazón: [x, y] entre -0.5 y 0.5
 
@@ -1477,14 +1477,16 @@ function applyAtmosphere(dt) {
   // los pétalos del corazón son como los de la rosa; al acercarnos, cristal más limpio para que se vea la foto
   heartGlass.transmission = lerp(pinkGlass.transmission, 1, reveal);
   heartGlass.emissiveIntensity = lerp(pinkGlass.emissiveIntensity, 0.06, reveal);
-  heartGlass.attenuationDistance = lerp(pinkGlass.attenuationDistance, 2.5, reveal);
-  heartGlass.thickness = lerp(0.35, 0.22, reveal);
-  heartGlass.ior = lerp(1.85, 1.4, reveal);
-  heartGlass.envMapIntensity = lerp(2.2, 1.0, reveal);
-  heartGlass.clearcoat = lerp(1, 0.5, reveal);
-  heartRim.value = 0.45 * reveal;
-  heartGlass.iridescence = lerp(0.3, 0.15, reveal);
-  heartTint.value = lerp(1, 0.5, reveal);
+  heartGlass.attenuationDistance = lerp(pinkGlass.attenuationDistance, 5, reveal);
+  // cristal fino y de poca refracción: la foto apenas se desplaza en cada faceta
+  heartGlass.thickness = lerp(0.35, 0.04, reveal);
+  heartGlass.ior = lerp(1.85, 1.12, reveal);
+  heartGlass.dispersion = pinkGlass.dispersion * (1 - 0.9 * reveal);
+  heartGlass.envMapIntensity = lerp(2.2, 0.7, reveal);
+  heartGlass.clearcoat = lerp(1, 0.3, reveal);
+  heartRim.value = 0.3 * reveal;
+  heartGlass.iridescence = lerp(0.3, 0.08, reveal);
+  heartTint.value = lerp(1, 0.35, reveal);
 }
 
 function updateRose(dt, t) {
