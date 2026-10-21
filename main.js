@@ -752,6 +752,43 @@ function jarGeometry() {
   return new THREE.LatheGeometry(pts, 48);
 }
 
+// Tapón de corcho: más ancho arriba, facetado y mate, con el grano del corcho
+const CORK_Y = 2.66; // su base, dentro del cuello
+function corkTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d'), r = mulberry32(73);
+  g.fillStyle = '#f1e2cf';
+  g.fillRect(0, 0, 256, 128);
+  for (let i = 0; i < 1400; i++) {
+    const dark = r() < 0.7;
+    g.fillStyle = dark ? `rgba(120,80,45,${0.15 + r() * 0.35})` : `rgba(255,248,235,${0.3 + r() * 0.4})`;
+    g.beginPath();
+    g.ellipse(r() * 256, r() * 128, 0.6 + r() * 2.6, 0.5 + r() * 1.4, r() * Math.PI, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(2, 1);
+  return t;
+}
+function corkGeometry() {
+  const prof = [[0, 0], [0.47, 0], [0.5, 0.035], [0.6, 0.6], [0.587, 0.645], [0.55, 0.668], [0, 0.668]];
+  const g = new THREE.LatheGeometry(prof.map(([x, y]) => new V2(x, y)), 16);
+  // un poco irregular, como el corcho de verdad (misma posición → mismo desplazamiento, así no se abren grietas)
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(z, x);
+    const k = 1 + 0.025 * Math.sin(a * 5 + y * 13) + 0.015 * Math.sin(a * 11 - y * 7);
+    p.setXYZ(i, x * k, y, z * k);
+  }
+  return facetColors(g, ['#e8bb8e', '#a46c45'], 74);
+}
+const corkMat = new THREE.MeshStandardMaterial({
+  vertexColors: true, map: corkTexture(), roughness: 0.92, metalness: 0, flatShading: true, envMapIntensity: 0.6,
+});
+
 // Ayuda: coloca una geometría (cara hacia +Z) mirando en la dirección dir, con un giro propio
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m = new THREE.Matrix4();
 function placed(geo, pos, dir, roll = 0, scale = 1) {
@@ -803,7 +840,7 @@ function carnation(seed) {
   return mergeGeometries(parts);
 }
 
-// Rama de eucalipto: tallo fino con hojas redondas por parejas; la punta sale desnuda por la boca
+// Rama de eucalipto: tallo fino con hojas redondas por parejas que suben hasta el cuello
 function sprig(path, seed) {
   const r = mulberry32(seed);
   const curve = new THREE.CatmullRomCurve3(path);
@@ -811,12 +848,12 @@ function sprig(path, seed) {
   const leaf = noUV(facetColors(new THREE.IcosahedronGeometry(1, 1), SAGE_FACETS, seed + 1));
   const T = new V3(), S = new V3(), N = new V3(), arb = new V3(0.3, 0.1, 1).normalize();
   let k = 0;
-  for (let t = 0.04; t < 0.6; t += 0.11, k++) {
+  for (let t = 0.06; t < 0.96; t += 0.12, k++) {
     const p = curve.getPointAt(t);
     curve.getTangentAt(t, T);
     S.crossVectors(T, arb).normalize().applyAxisAngle(T, (k % 2) * (Math.PI / 2) + (r() - 0.5) * 0.4);
     N.crossVectors(S, T).normalize();
-    const size = (0.17 - t * 0.09) * (0.85 + r() * 0.3);
+    const size = (0.16 - t * 0.06) * (0.85 + r() * 0.3);
     for (const side of [1, -1]) {
       const sx = S.clone().multiplyScalar(side);
       const basis = new THREE.Matrix4().makeBasis(sx, T, N.clone().multiplyScalar(side));
@@ -859,13 +896,17 @@ function sprig(path, seed) {
   // arriba, margaritas algo inclinadas hacia la boca
   [60, 180, 300].forEach((a, i) => addDaisy(ring(a * deg, 1.98, 0.4, 0.6), 930 + i, 0.92));
   addDaisy(ring(-25 * deg, 2.12, 0.34, 0.9), 934, 0.8);
-  // eucalipto, saliendo por la boca
-  sage.push(sprig([new V3(0.12, 1.15, 0.22), new V3(0.02, 2.0, 0.14), new V3(-0.1, 2.75, 0.05), new V3(-0.17, 3.5, 0)], 940));
-  sage.push(sprig([new V3(-0.26, 1.35, -0.12), new V3(0.04, 2.2, -0.06), new V3(0.18, 2.9, 0), new V3(0.27, 3.62, 0.05)], 941));
+  // eucalipto, subiendo hasta el cuello (el tapón queda justo encima)
+  sage.push(sprig([new V3(0.12, 1.15, 0.22), new V3(0.03, 1.75, 0.15), new V3(-0.08, 2.25, 0.06), new V3(-0.14, 2.6, 0)], 940));
+  sage.push(sprig([new V3(-0.26, 1.35, -0.12), new V3(-0.02, 1.9, -0.06), new V3(0.14, 2.3, 0), new V3(0.2, 2.6, 0.04)], 941));
 
   for (const [list, mat] of [[white, whiteGlass], [centers, greenGlass], [pink, fuchsiaGlass], [sage, sageGlass]]) {
     jar.content.add(new THREE.Mesh(mergeGeometries(list), mat));
   }
+
+  jar.cork = new THREE.Mesh(corkGeometry(), corkMat);
+  jar.cork.position.y = CORK_Y;
+  jar.content.add(jar.cork);
 
   // unos destellos dentro del cristal
   const jr = mulberry32(950);
@@ -884,12 +925,12 @@ function fitJar() {
   const halfH = Math.max(3.5, 3.8 / 2 / camera.aspect);
   const look = startView().look;
   jar.S = Math.min((0.56 * 2 * halfH) / JAR.H, (0.7 * 2 * halfH * camera.aspect) / (2 * JAR.R));
-  jar.baseY = look.y + 0.08 * halfH - 1.75 * jar.S;
+  jar.baseY = look.y + 0.08 * halfH - 1.66 * jar.S;
 }
 
 function updateJar(dt, t) {
   if (!jar.root.visible) return;
-  if (!jar.dragging) {
+  if (!jar.dragging && state !== 'release') {
     jar.yawVel += (JAR_SPIN - jar.yawVel) * (1 - Math.exp(-dt * 1.2)); // tras soltarlo frena y vuelve a girar solo
     jar.yaw += jar.yawVel * dt;
     jar.tilt *= Math.exp(-dt * 3);
@@ -901,19 +942,46 @@ function updateJar(dt, t) {
   jar.root.scale.setScalar(Math.max(1e-4, jar.S * jar.scale));
 }
 
-// Al tocar el tarro: la rosa sube por la boca, crece y se queda flotando; el tarro cae y desaparece
+// Al tocar el tarro: el tapón se afloja y salta, la rosa sube por la boca, crece y se queda flotando;
+// el tarro cae y desaparece
 let releaseFx = null;
+const jarUp = () => new V3(0, 1, 0).applyQuaternion(jar.spin.getWorldQuaternion(new THREE.Quaternion()));
+const jarMouth = () => jar.content.localToWorld(new V3(0, JAR.H + 0.1, 0));
+
 function openJar() {
   if (state !== 'jar') return;
   state = 'release';
   document.body.classList.remove('show-hint');
-  if (isTouch) navigator.vibrate?.(18);
   jar.dragging = false;
-  jar.shake = 1;
+  jar.yawVel = 0;
+  const cork = jar.cork;
+  tween(0.38, (k) => {
+    cork.rotation.y = Math.sin(k * Math.PI * 4) * 0.22;
+    cork.position.y = CORK_Y + 0.07 * k;
+  }, { onDone: popCork });
+}
 
-  const up = new V3(0, 1, 0).applyQuaternion(jar.spin.getWorldQuaternion(new THREE.Quaternion()));
-  const mouth = jar.content.localToWorld(new V3(0, JAR.H + 0.1, 0));
-  burst.emit(mouth, 30, { speed: 1.4, size: 0.14, life: 1.2, spread: 0.3 });
+function popCork() {
+  const cork = jar.cork;
+  if (isTouch) navigator.vibrate?.(18);
+  jar.shake = 1;
+  burst.emit(jarMouth(), 45, { speed: 2.2, size: 0.15, life: 1.2, spread: 0.25, up: 0.8 });
+  scene.attach(cork);
+  const c0 = cork.position.clone(), q0 = cork.quaternion.clone();
+  const v = jarUp().multiplyScalar(7.5).add(new V3((rand() < 0.5 ? -1 : 1) * rr(2.2, 3.2), 0, rr(0.5, 1.5)));
+  const axis = randomUnit(), spinRate = rr(9, 13), D = 1.6;
+  tween(D, (k) => {
+    const t = k * D;
+    cork.position.copy(c0).addScaledVector(v, t);
+    cork.position.y -= 4.5 * t * t;
+    cork.quaternion.copy(q0).premultiply(tmpQ.setFromAxisAngle(axis, spinRate * t));
+  }, { onDone: () => { cork.visible = false; } });
+  wait(0.12, releaseRose);
+}
+
+function releaseRose() {
+  const up = jarUp();
+  burst.emit(jarMouth(), 20, { speed: 1.2, size: 0.13, life: 1.1, spread: 0.3 });
   scene.attach(rose.root);
   const p0 = rose.root.position.clone(), q0 = rose.root.quaternion.clone(), s0 = rose.root.scale.x;
   const p1 = p0.clone().addScaledVector(up, 1.9 * jar.S); // la flor asoma por encima de la boca
@@ -1441,7 +1509,7 @@ function step(dt) {
   applyAtmosphere(dt);
   updateJar(dt, time);
   if (rose.root.visible) updateRose(dt, time);
-  if (state === 'intro' || state === 'jar') {
+  if (rose.root.parent === jar.content) {
     // mientras está en el tarro, la rosa se queda en su sitio dentro de él
     rose.root.position.copy(ROSE_IN_JAR.pos);
     rose.root.scale.setScalar(ROSE_IN_JAR.scale);
