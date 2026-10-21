@@ -4,9 +4,12 @@ import { createParis } from './paris.js';
 
 /* ================= Ajustes ================= */
 
-const PHOTO_URL = 'foto.jpg';
-const PHOTO_ZOOM = 1.0;        // >1 amplía la foto dentro del corazón
-const PHOTO_OFFSET = [0, 0];   // mueve la foto dentro del corazón: [x, y] entre -0.5 y 0.5
+// Fotos del corazón (cuadradas): se ven a través de los pétalos y van pasando en este orden
+const PHOTOS = ['fotos/1.webp', 'fotos/2.webp', 'fotos/3.webp', 'fotos/4.webp', 'fotos/5.webp', 'fotos/6.webp'];
+const PHOTO_HOLD = 4.5;        // segundos que se ve cada foto
+const PHOTO_FADE = 1.4;        // fundido de una a la siguiente
+const PHOTO_ZOOM = 1.0;        // >1 amplía las fotos dentro del corazón
+const PHOTO_OFFSET = [0, 0];   // mueve las fotos dentro del corazón: [x, y] entre -0.5 y 0.5
 
 const HEART_POS = new THREE.Vector3(0, 0.3, -22);
 const HEART_WIDTH = 6.4;
@@ -753,7 +756,7 @@ function jarGeometry() {
 }
 
 // Tapón de corcho: más ancho arriba, facetado y mate, con el grano del corcho
-const CORK_Y = 2.66; // su base, dentro del cuello
+const CORK_Y = 2.82; // su base, dentro del cuello
 function corkTexture() {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 128;
@@ -774,7 +777,7 @@ function corkTexture() {
   return t;
 }
 function corkGeometry() {
-  const prof = [[0, 0], [0.47, 0], [0.5, 0.035], [0.6, 0.6], [0.587, 0.645], [0.55, 0.668], [0, 0.668]];
+  const prof = [[0, 0], [0.48, 0], [0.51, 0.025], [0.585, 0.34], [0.573, 0.37], [0.54, 0.385], [0, 0.385]];
   const g = new THREE.LatheGeometry(prof.map(([x, y]) => new V2(x, y)), 16);
   // un poco irregular, como el corcho de verdad (misma posición → mismo desplazamiento, así no se abren grietas)
   const p = g.attributes.position;
@@ -897,8 +900,8 @@ function sprig(path, seed) {
   [60, 180, 300].forEach((a, i) => addDaisy(ring(a * deg, 1.98, 0.4, 0.6), 930 + i, 0.92));
   addDaisy(ring(-25 * deg, 2.12, 0.34, 0.9), 934, 0.8);
   // eucalipto, subiendo hasta el cuello (el tapón queda justo encima)
-  sage.push(sprig([new V3(0.12, 1.15, 0.22), new V3(0.03, 1.75, 0.15), new V3(-0.08, 2.25, 0.06), new V3(-0.14, 2.6, 0)], 940));
-  sage.push(sprig([new V3(-0.26, 1.35, -0.12), new V3(-0.02, 1.9, -0.06), new V3(0.14, 2.3, 0), new V3(0.2, 2.6, 0.04)], 941));
+  sage.push(sprig([new V3(0.12, 1.15, 0.22), new V3(0.03, 1.75, 0.15), new V3(-0.08, 2.25, 0.06), new V3(-0.14, 2.72, 0)], 940));
+  sage.push(sprig([new V3(-0.26, 1.35, -0.12), new V3(-0.02, 1.9, -0.06), new V3(0.14, 2.3, 0), new V3(0.2, 2.72, 0.04)], 941));
 
   for (const [list, mat] of [[white, whiteGlass], [centers, greenGlass], [pink, fuchsiaGlass], [sage, sageGlass]]) {
     jar.content.add(new THREE.Mesh(mergeGeometries(list), mat));
@@ -925,7 +928,7 @@ function fitJar() {
   const halfH = Math.max(3.5, 3.8 / 2 / camera.aspect);
   const look = startView().look;
   jar.S = Math.min((0.56 * 2 * halfH) / JAR.H, (0.7 * 2 * halfH * camera.aspect) / (2 * JAR.R));
-  jar.baseY = look.y + 0.08 * halfH - 1.66 * jar.S;
+  jar.baseY = look.y + 0.08 * halfH - 1.6 * jar.S;
 }
 
 function updateJar(dt, t) {
@@ -1053,33 +1056,30 @@ function insidePoly(pts, x, y) {
   }
   return c;
 }
-// Foto
-const photoTex = new THREE.TextureLoader().load(
-  PHOTO_URL,
-  (tex) => {
-    const { width: w, height: h } = tex.image;
-    if (w !== h) {
-      // recorte centrado si la foto no es cuadrada
-      if (w > h) { tex.repeat.set(h / w, 1); tex.offset.set((1 - h / w) / 2, 0); }
-      else { tex.repeat.set(1, w / h); tex.offset.set(0, (1 - w / h) / 2); }
-    }
-  },
-  undefined,
-  () => {
-    const c = document.createElement('canvas');
-    c.width = c.height = 512;
-    const g = c.getContext('2d');
-    const grd = g.createLinearGradient(0, 0, 0, 512);
-    grd.addColorStop(0, '#3a1460');
-    grd.addColorStop(1, '#ff7aa8');
-    g.fillStyle = grd;
-    g.fillRect(0, 0, 512, 512);
-    photoTex.image = c;
-    photoTex.needsUpdate = true;
-  },
-);
-photoTex.colorSpace = THREE.SRGBColorSpace;
-photoTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+// Fotos: se cargan al principio y se suben a la GPU en cuanto llegan, para que luego no haya tirones
+const photoTexs = PHOTOS.map((url) => {
+  const tex = new THREE.TextureLoader().load(
+    url,
+    (t) => renderer.initTexture(t),
+    undefined,
+    () => {
+      // si una foto falla, un degradado en su lugar
+      const c = document.createElement('canvas');
+      c.width = c.height = 512;
+      const g = c.getContext('2d');
+      const grd = g.createLinearGradient(0, 0, 0, 512);
+      grd.addColorStop(0, '#3a1460');
+      grd.addColorStop(1, '#ff7aa8');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 512, 512);
+      tex.image = c;
+      tex.needsUpdate = true;
+    },
+  );
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+});
 
 // Los pétalos del corazón son del mismo cristal que la rosa; al acercarnos se aclara para que se vea la foto a través
 const heartTint = { value: 1 }; // 1 = facetas rosas como en la rosa; menos = cristal más limpio
@@ -1163,14 +1163,24 @@ const heartCells = (() => {
 
 // La foto, detrás de los pétalos. Solo se dibuja en la pasada de transmisión,
 // así que únicamente se ve a través del cristal: donde no hay pétalo, no hay foto.
+// Lleva dos fotos a la vez para poder fundir de una a la siguiente.
+const photoNext = { value: photoTexs[1 % photoTexs.length] };
+const photoMix = { value: 0 };
 const photoPanel = (() => {
   const geo = new THREE.ShapeGeometry(new THREE.Shape(heartPts.map((p) => p.clone().multiplyScalar(0.98))));
   const p = geo.attributes.position, uv = geo.attributes.uv;
   for (let i = 0; i < p.count; i++) uv.setXY(i, ...photoUV(p.getX(i), p.getY(i)));
-  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    map: photoTex, color: new THREE.Color().setScalar(1.35), opacity: 0, fog: false,
+  const mat = new THREE.MeshBasicMaterial({
+    map: photoTexs[0], color: new THREE.Color().setScalar(1.35), opacity: 0, fog: false,
     blending: THREE.CustomBlending, // "opaca" para three.js (así entra en la transmisión), pero puede fundirse
-  }));
+  });
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, { uMap2: photoNext, uMix: photoMix });
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D uMap2;\nuniform float uMix;')
+      .replace('#include <map_fragment>', 'diffuseColor *= mix(texture2D(map, vMapUv), texture2D(uMap2, vMapUv), uMix);');
+  };
+  const m = new THREE.Mesh(geo, mat);
   m.position.z = -0.4;
   m.visible = false;
   m.onBeforeRender = (r) => {
@@ -1493,6 +1503,21 @@ function updateRose(dt, t) {
   rose.root.scale.setScalar(rose.scale);
 }
 
+// Al final, las fotos van pasando en orden (y vuelven a empezar)
+let photoIndex = 0, photoClock = 0;
+function updatePhotos(dt) {
+  if (photoTexs.length < 2) return;
+  photoClock += dt;
+  photoMix.value = ease.inOutSine(clamp((photoClock - PHOTO_HOLD) / PHOTO_FADE, 0, 1));
+  if (photoClock >= PHOTO_HOLD + PHOTO_FADE) {
+    photoIndex = (photoIndex + 1) % photoTexs.length;
+    photoPanel.material.map = photoTexs[photoIndex];
+    photoNext.value = photoTexs[(photoIndex + 1) % photoTexs.length];
+    photoMix.value = 0;
+    photoClock = 0;
+  }
+}
+
 function heartbeat(t) {
   const p = (t % 1.4) / 1.4;
   return Math.exp(-(((p - 0.05) * 14) ** 2)) + 0.6 * Math.exp(-(((p - 0.22) * 14) ** 2));
@@ -1518,6 +1543,7 @@ function step(dt) {
   burst.update(dt);
 
   if (state === 'final') {
+    updatePhotos(dt);
     heart.scale.setScalar(1 + 0.018 * heartbeat(time));
     const drift = new V3(Math.sin(time * 0.3) * 0.25 + parallax.x * 0.5, Math.cos(time * 0.23) * 0.15 - parallax.y * 0.35, 0);
     camera.position.lerp(finalView.pos.clone().add(drift), 1 - Math.exp(-dt * 2));
