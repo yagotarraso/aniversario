@@ -1,0 +1,122 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  color: #ffe6f0;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: pointer;
+  outline: none;
+}
+
+#hint {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(6vh + env(safe-area-inset-bottom));
+  margin: 0;
+  text-align: center;
+  font: italic 500 clamp(1.15rem, 4.5vw, 1.5rem) / 1 'Cormorant Garamond', Georgia, serif;
+  letter-spacing: 0.08em;
+  color: #c2457e;
+  text-shadow: 0 0 10px rgba(255, 170, 205, 0.6);
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  pointer-events: none;
+}
+body.show-hint #hint {
+  opacity: 1;
+  animation: breathe 2.6s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% { opacity: 0.45; }
+}
+
+#final {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(5vh + env(safe-area-inset-bottom));
+  padding: 0 16px;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 2.4s ease, transform 2.4s ease;
+  pointer-events: none;
+}
+body.final #final {
+  opacity: 1;
+  transform: none;
+}
+#final h1 {
+  margin: 0;
+  font-family: 'Great Vibes', 'Brush Script MT', cursive;
+  font-weight: 400;
+  font-size: clamp(2.6rem, 10vw, 4.4rem);
+  line-height: 1.08;
+  color: #fff0f6;
+  text-shadow: 0 0 22px rgba(255, 95, 165, 0.75), 0 0 3px rgba(255, 255, 255, 0.5);
+}
+#final h1 span {
+  display: inline-block;
+}
+@media (max-aspect-ratio: 1/1) {
+  #final h1 span { display: block; }
+}
+
+#replay {
+  margin-top: 1.1rem;
+  padding: 0.45em 1.2em;
+  font: italic 500 1.05rem 'Cormorant Garamond', Georgia, serif;
+  letter-spacing: 0.06em;
+  color: rgba(255, 225, 238, 0.9);
+  background: rgba(255, 120, 180, 0.08);
+  border: 1px solid rgba(255, 170, 205, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 1.5s ease 3s, background 0.3s ease;
+}
+body.final #replay {
+  opacity: 1;
+  pointer-events: auto;
+}
+#replay:hover {
+  background: rgba(255, 120, 180, 0.18);
+}
+
+#veil {
+  position: fixed;
+  inset: 0;
+  background: #ffffff;
+  pointer-events: none;
+  transition: opacity 1.8s ease;
+}
+body.ready #veil {
+  opacity: 0;
+}
+
+#nogl {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  font: italic 500 1.3rem 'Cormorant Garamond', Georgia, serif;
+}
+#nogl[hidden] {
+  display: none;
+}
